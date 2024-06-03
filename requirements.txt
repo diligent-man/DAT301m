@@ -1,0 +1,5 @@
+pandas==2.0.3
+tensorflow==2.13.1
+tensorboard==2.13.0
+tensorflow-datasets==4.9.2
+tensorflow-text==2.13.0
