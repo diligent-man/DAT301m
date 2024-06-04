@@ -1,15 +1,20 @@
 import os
+import torch
+
 import numpy as np
 from tqdm import tqdm
 from PIL import Image
 from matplotlib import pyplot as plt
-from torchvision.datasets import ImageFolder
-from typing import List, Optional, Callable, Iterator, Set
+from reusable_generator import ReusableGenerator
+from typing import Dict, Set, List, Tuple, Optional, Callable, Iterator
 
+from torch.utils.data import DataLoader
+from torchvision.transforms import Compose
+from torchvision.datasets import ImageFolder
 
 plt.switch_backend("tkagg")
 
-__all__ = ["batch_visualization",  "get_image_folder_dataset", "get_imgs_save_path", "save_imgs"]
+__all__ = ["batch_visualization", "get_image_folder_dataset", "get_pair_dataloader","get_imgs_save_path", "save_imgs"]
 
 
 ################################################################################################
@@ -21,6 +26,8 @@ def _get_path_by_depth(path: str, depth: int, end_depth: int = None) -> str:
     else:
         depth_by_path = f"{os.sep}".join(reversed_path[end_depth: depth][::-1])
     return depth_by_path
+
+
 #################################################################################################
 
 
@@ -67,16 +74,17 @@ def get_image_folder_dataset(root: str,
             if flag:
                 min_depth = depth
                 flag = False
-            dataset: ImageFolder = ImageFolder(os.path.join(root, _get_path_by_depth(dirpath, depth, depth-1)), transform, target_transform)
+            dataset: ImageFolder = ImageFolder(os.path.join(root, _get_path_by_depth(dirpath, depth, depth - 1)),
+                                               transform, target_transform)
             yield dataset, depth
         else:
             depth += 1
 
         # Reset when meet root
-        if _get_path_by_depth(dirpath, depth+num_classes-1, 1) == root:
+        if _get_path_by_depth(dirpath, depth + (2 * num_classes), 1) == root:
             flag = True
             depth = min_depth
-            num_classes = 0
+            num_classes = 1
 
         # Retrieve num_class for reset condition
         try:
@@ -84,6 +92,29 @@ def get_image_folder_dataset(root: str,
                 num_classes = len(dirname)
         except:
             continue
+
+
+
+@ReusableGenerator
+def get_pair_dataloader(roots: List[str],
+                        save_path_root: str,
+                        batch_size: int,
+                        transform: Compose = None,
+                        target_transform: Compose = None
+                        ) -> Tuple[List[DataLoader], List[str]]:
+    pair_dataloaders: Dict[int: Dict[str: List[DataLoader], str: List[str]]] = {}
+    for root in roots:
+        i = 0
+        for dataset, depth in get_image_folder_dataset(root, transform, target_transform):
+            dataloader: DataLoader = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=4, shuffle=False, drop_last=False)
+            if i not in pair_dataloaders.keys():
+                pair_dataloaders[i] = {"dataloader": [dataloader], "save_path": get_imgs_save_path(dataset, depth, save_path_root)}
+            else:
+                pair_dataloaders[i]["dataloader"].append(dataloader)
+            i += 1
+
+    for i in range(len(pair_dataloaders)):
+        yield pair_dataloaders[i]["dataloader"], pair_dataloaders[i]["save_path"]
 
 
 def get_imgs_save_path(dataset: ImageFolder,
