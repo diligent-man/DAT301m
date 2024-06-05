@@ -3,17 +3,18 @@ import gc
 import shutil
 import itertools
 import numpy as np
-
 from tqdm import tqdm
 from HED import get_HED
+from typing import List, Tuple
 from matplotlib import pyplot as plt
-from typing import List, Tuple, Dict
+from PIL.ImageOps import exif_transpose
 
 
 import torch
-from torch.utils.data import DataLoader
+import torchvision
+from torch.utils.data import DataLoader, StackDataset
 from torchvision.transforms import v2, Compose, InterpolationMode
-from utils import get_image_folder_dataset, get_imgs_save_path, get_pair_dataloader, save_imgs
+from utils import img_folder_datasets, get_imgs_save_path, get_pair_dataloader, save_imgs
 
 
 plt.switch_backend("tkagg")
@@ -37,7 +38,8 @@ def detect_edge(root: str ,
                                      invert_color: bool = False
                                      ) -> Compose:
         transform_lst = [
-            v2.Resize(size=input_shape, interpolation=InterpolationMode.BICUBIC, antialias=True),
+            v2.Lambda(lambda img: exif_transpose(img)),
+            v2.Resize(input_shape, InterpolationMode.BICUBIC, antialias=True),
             v2.RandomAutocontrast(p=1.),
             v2.RandomAdjustSharpness(p=1., sharpness_factor=2.),
             v2.GaussianBlur(kernel_size=3, sigma=1.)
@@ -55,13 +57,13 @@ def detect_edge(root: str ,
     def _canny_detector():
         pass
 
-    def _HED_detector(imgs: torch.Tensor) -> torch.Tensor:
+    def _HED_detector(imgs: torch.Tensor, device: str = "cuda") -> torch.Tensor:
         # Create model if not exist in local var
         if "model" not in locals():
             model = get_HED(device=device).eval()
 
         preds = model(imgs.to(device))
-        preds = torch.squeeze(preds, dim=1).cpu()  # Model's return: N,1,H,W --sqeeze--> N,H,W
+        preds = torch.squeeze(preds, dim=1).cpu()  # Model's return: B,1,H,W --sqeeze--> B,H,W
         preds = (torch.squeeze(preds) if batch_size == 1 else preds) * 255.  # H,W if N==1
         preds = v2.CenterCrop(size=[int(size * (1 - crop_rate)) for size in input_shape])(preds)  # crop 20% border to reduce noise edges
         return preds
@@ -70,16 +72,17 @@ def detect_edge(root: str ,
     available_algorithms = ["hed", "canny"]
     assert algorithm in available_algorithms, f"Your selected algorithm is unavailable"
 
-    for dataset, depth in get_image_folder_dataset(root, _get_preprocessing_transform(input_shape, invert_color)):
+    for dataset, depth in img_folder_datasets(root, _get_preprocessing_transform(input_shape, invert_color)):
         imgs_save_path: List[str] = get_imgs_save_path(dataset, depth, save_path_root)
-        dataloader: DataLoader = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=4, shuffle=False, drop_last=False)
+        dataloader: DataLoader = DataLoader(dataset, batch_size, False, num_workers=4, drop_last=False)
 
         # Used for saving image
-        cached_preds: np.ndarray = None
-        cached_origins: np.ndarray = None
+        cached_preds: np.ndarray = None  # BHW
+        cached_origins: np.ndarray = None  # B3HW
+
         for (imgs, labels) in tqdm(dataloader, total=len(dataloader), desc="Detecting"):
             if algorithm == "hed":
-                preds = _HED_detector(imgs).type(torch.uint8).numpy()
+                preds = _HED_detector(imgs, device).type(torch.uint8).numpy()
                 preds = np.where(preds > 0, 255, preds)
             elif algorithm == "canny":
                 pass
@@ -88,14 +91,14 @@ def detect_edge(root: str ,
 
             # cache original imgs along
             if save_origin_along:
-                origins = imgs.type(torch.uint8).numpy()
-                cached_origins = origins if cached_origins is None else np.vstack((cached_origins, origins))
+                imgs = imgs.type(torch.uint8).numpy()
+                cached_origins = imgs if cached_origins is None else np.vstack((cached_origins, imgs))
 
         # Save cached imgs
         if save_origin_along:
-            save_imgs(cached_preds, save_path_root, imgs_save_path, cached_origins)
+            save_imgs(cached_preds, save_path_root, imgs_save_path, cached_origins, pred_mode="L")
         else:
-            save_imgs(cached_preds, save_path_root, imgs_save_path)
+            save_imgs(cached_preds, save_path_root, imgs_save_path, pred_mode="L")
 
         # Reset cuda
         torch.cuda.empty_cache()
@@ -111,8 +114,7 @@ def merge_detected_edge(merge_roots: List[str],
     def _get_preprocessing() -> Compose:
         return Compose([
             v2.PILToTensor(),
-            v2.ToDtype(torch.float32),
-
+            v2.ToDtype(torch.float32, False)
         ])
 
     for dataloaders, save_path in get_pair_dataloader(merge_roots, save_path_root, batch_size, _get_preprocessing()):
@@ -136,104 +138,68 @@ def merge_detected_edge(merge_roots: List[str],
 
 
 def crop_image_by_edge(orig_img_path: str,
-                       edge_img_path,
+                       edge_img_path: str,
                        save_path_root: str,
                        batch_size: int = 1,
                        delete_merge_roots: bool = True
                        ) -> None:
-    def _get_preprocessing() -> Compose:
+    def _orig_img_preprocessing() -> Compose:
         return Compose([
+            v2.Lambda(lambda img: exif_transpose(img)),
+            v2.Resize((1200, 1200), InterpolationMode.BICUBIC, antialias=True),
             v2.PILToTensor(),
-            v2.ToDtype(torch.float32),
-
+            v2.ToDtype(torch.float32, False),
         ])
 
-    pair_dataloaders: Tuple[List[DataLoader], List[str]] = get_pair_dataloader(
-        [edge_img_path, orig_img_path],
-        save_path_root,
-        batch_size,
-        _get_preprocessing()
-    )
+    def _edge_img_preprocessing() -> Compose:
+        return Compose([
+            v2.Grayscale(),
+            v2.PILToTensor(),
+            v2.ToDtype(torch.float32, False)
+        ])
 
-    for (dataloaders, save_path) in pair_dataloaders:
-        print(dataloaders)
-        # continue
-        # for dataloader in dataloaders:
-        #     for imgs, labels in tqdm(dataloader, total=len(dataloader), desc=phase):
-        #         continue
-    # orig_img_dataloader = DataLoader(dataset=get_image_folder_dataset(orig_img_path),
-    #                                  batch_size=batch_size,
-    #                                  num_workers=4,
-    #                                  shuffle=False,
-    #                                  drop_last=False
-    #                                  )
-    # edge_img_dataloader = DataLoader(dataset=get_image_folder_dataset(edge_img_path),
-    #                                  batch_size=batch_size,
-    #                                  num_workers=4,
-    #                                  shuffle=False,
-    #                                  drop_last=False
-    #                                  )
+    def _compute_rotation_angle(edge_img: torch.Tensor) -> int:
+        ROI = torch.argwhere(edge_img > 0)
 
-    # for (orig_imgs, _), (edge_imgs, _) in tqdm(zip(orig_img_dataloader, edge_img_dataloader), total=len(orig_img_dataloader)):
-    #     continue
+        try:
+            v = torch.max(ROI, axis=0)[0] - torch.min(ROI, axis=0)[0]
+            v =v.roll(1)  # (y, x) -> (x, y)
+            i = torch.tensor([1, 0])
 
+            angle = (v @ i) / (torch.sqrt(v@v) * torch.sqrt(i@i))
+            angle = torch.arccos(angle)
+            angle = (angle * 180 / torch.pi).type(torch.int)
+            angle = torch.tensor(90)
+            # print(angle)
+        except:
+            angle = torch.tensor(0)
+        return angle.item()
 
+    def _rotate_img(img, angle, interpolation=InterpolationMode.BILINEAR) -> np.ndarray:
+        img = torchvision.transforms.v2.functional.rotate(img, angle, interpolation)
+        return img.detach().cpu().numpy()
 
+    for (orig_dataset, depth), (edge_dataset, _) in zip(img_folder_datasets(orig_img_path, _orig_img_preprocessing()),
+                                                        img_folder_datasets(edge_img_path, _edge_img_preprocessing())):
+        save_paths = get_imgs_save_path(orig_dataset, depth, save_path_root)
+        print(orig_dataset, edge_dataset)
+        dataloader = DataLoader(StackDataset(orig_dataset, edge_dataset), batch_size=batch_size, shuffle=False, drop_last=False)
 
-    # # argwhere, max, min
-    # img = "/home/trong/Downloads/Dataset/seam_puckering/black_s_black (31)/level_1/black_s_black_l1_17.jpg"
-    # # img = "/home/trong/Downloads/Dataset/seam_puckering/black_s_black (31)/level_1/black_s_black_l1_15.jpg"
-    #
-    # edge_img = "/home/trong/Downloads/merge_output/black_s_black (31)/level_1/black_s_black_l1_17.jpg"
-    # # edge_img = "/home/trong/Downloads/merge_output/black_s_black (31)/level_1/black_s_black_l1_15.jpg"
-    # ####
-    #
-    # img = torchvision.io.read_image(img, mode=torchvision.io.ImageReadMode.GRAY).squeeze()
-    # edge_img = torchvision.io.read_image(edge_img, mode=torchvision.io.ImageReadMode.GRAY).squeeze()
-    #
-    #
-    # ## find the non-zero min-max coords of canny
-    # ROI = torch.argwhere(edge_img > 0)
-    # y1, x1 = torch.min(ROI, axis=0)[0].tolist()
-    # y2, x2 = torch.max(ROI, axis=0)[0].tolist()
-    #
-    # # img = edge_img[y1:y2, x1:x2].numpy()
-    # # PIL.Image.fromarray(img).save(fp="/home/trong/Downloads/cropped.jpg")
-    #
-    # v = np.array([x2-x1, y2-y1])
-    # i = np.array([1, 0])
-    # j = np.array([0, 1])
-    #
-    # #####
-    # angle = 90 - round(np.arccos((v@i)/(np.linalg.norm(v)*np.linalg.norm(i))) * 180 / np.pi)
-    # edge_img = torchvision.transforms.v2.functional.rotate(edge_img.unsqueeze(dim=0), angle=angle, interpolation=InterpolationMode.BILINEAR)
-    #
-    # affine_matrix = np.array([[np.cos(5), -np.sin(5), 0],
-    #                             [np.sin(5), np.cos(5), 0],
-    #                             [0, 0, 1]])
-    # matrix = np.array([[x1, x2], [y1, y2], [0,0]])
-    # print(matrix)
-    # print(np.matmul(affine_matrix, matrix))
-    #
-    #
-    # ######
-    # PIL.Image.fromarray(edge_img.squeeze().numpy()).save(fp="/home/trong/Downloads/cropped.jpg")
+        aggregated_orig_imgs: np.ndarray = None
+        aggregated_edge_imgs: np.ndarray = None
 
+        for (orig_imgs, _), (edge_imgs, _) in tqdm(dataloader, total=len(dataloader)):
+            angles: List[int] = list(map(_compute_rotation_angle, edge_imgs.squeeze(dim=1)))  # (B,H,W)
+            # print(angles)
+            rotated_orig_imgs = np.array(list(map(_rotate_img, orig_imgs.to("cuda"), angles)))  # B,3,H,W
+            rotated_edge_imgs = np.array(list(map(_rotate_img, edge_imgs.to("cuda"), angles)))  # B,1,H,W
 
+            # aggregated_orig_imgs = rotated_orig_imgs if aggregated_orig_imgs is None else np.vstack((aggregated_orig_imgs, rotated_orig_imgs))
+            # aggregated_edge_imgs = aggregated_edge_imgs if aggregated_edge_imgs is None else np.vstack((aggregated_edge_imgs, rotated_edge_imgs))
 
-
-    ## find the non-zero min-max coords of canny
-    # img = img.numpy()
-    # pts = np.argwhere(img > 0)
-    # y1, x1 = pts.min(axis=0)
-    # y2, x2 = pts.max(axis=0)
-    # print(y1, x1)
-    # print(y2, x2)
-    #
-    # import cv2 as cv
-    # cropped = img[y1:y2, x1:x2]
-    # cv.imwrite("/home/trong/Downloads/cropped.png", cropped)
-
+            aggregated_orig_imgs = orig_imgs.numpy() if aggregated_orig_imgs is None else np.vstack((aggregated_orig_imgs, orig_imgs.numpy()))
+        aggregated_orig_imgs = np.transpose(aggregated_orig_imgs.astype(np.uint8), (0, 2, 3, 1))
+        save_imgs(aggregated_orig_imgs, save_path_root, save_paths)
     return None
 
 
@@ -256,7 +222,8 @@ def main() -> None:
     # merge_detected_edge(merge_roots, edge_img_root, batch_size=9999, delete_merge_roots=False)
     #####################################################################
     cropped_img_root = os.path.join(os.getenv("HOME"), "Downloads/crop_output")
-    crop_image_by_edge(root, edge_img_root, cropped_img_root)
+    # crop_image_by_edge(root, edge_img_root, cropped_img_root, batch_size=999)
+    # TODO: CHeck rotation angle
     return None
 
 

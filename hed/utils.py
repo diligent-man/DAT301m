@@ -1,12 +1,10 @@
 import os
-import torch
-
 import numpy as np
 from tqdm import tqdm
 from PIL import Image
 from matplotlib import pyplot as plt
 from reusable_generator import ReusableGenerator
-from typing import Dict, Set, List, Tuple, Optional, Callable, Iterator
+from typing import Dict, Set, List, Tuple, Optional, Callable, Iterator, Union
 
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose
@@ -14,7 +12,7 @@ from torchvision.datasets import ImageFolder
 
 plt.switch_backend("tkagg")
 
-__all__ = ["batch_visualization", "get_image_folder_dataset", "get_pair_dataloader","get_imgs_save_path", "save_imgs"]
+__all__ = ["batch_visualization", "img_folder_datasets", "get_pair_dataloader", "get_imgs_save_path", "save_imgs"]
 
 
 ################################################################################################
@@ -61,10 +59,10 @@ def batch_visualization(images: np.ndarray,
     return None
 
 
-def get_image_folder_dataset(root: str,
-                             transform: Optional[Callable] = None,
-                             target_transform: Optional[Callable] = None
-                             ) -> Iterator[ImageFolder]:
+def img_folder_datasets(root: str,
+                        transform: Optional[Callable] = None,
+                        target_transform: Optional[Callable] = None
+                        ) -> Iterator[ImageFolder]:
     depth = 0
     flag = True
     min_depth = 0
@@ -74,14 +72,13 @@ def get_image_folder_dataset(root: str,
             if flag:
                 min_depth = depth
                 flag = False
-            dataset: ImageFolder = ImageFolder(os.path.join(root, _get_path_by_depth(dirpath, depth, depth - 1)),
-                                               transform, target_transform)
+            dataset: ImageFolder = ImageFolder(os.path.join(root, _get_path_by_depth(dirpath, depth, depth - 1)), transform, target_transform)
             yield dataset, depth
         else:
             depth += 1
 
         # Reset when meet root
-        if _get_path_by_depth(dirpath, depth + (2 * num_classes), 1) == root:
+        if _get_path_by_depth(dirpath, depth + (999 * num_classes), 1) == root:
             flag = True
             depth = min_depth
             num_classes = 1
@@ -105,7 +102,7 @@ def get_pair_dataloader(roots: List[str],
     pair_dataloaders: Dict[int: Dict[str: List[DataLoader], str: List[str]]] = {}
     for root in roots:
         i = 0
-        for dataset, depth in get_image_folder_dataset(root, transform, target_transform):
+        for dataset, depth in img_folder_datasets(root, transform, target_transform):
             dataloader: DataLoader = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=4, shuffle=False, drop_last=False)
             if i not in pair_dataloaders.keys():
                 pair_dataloaders[i] = {"dataloader": [dataloader], "save_path": get_imgs_save_path(dataset, depth, save_path_root)}
@@ -138,22 +135,28 @@ def get_imgs_save_path(dataset: ImageFolder,
 def save_imgs(preds: np.ndarray,
               save_path_root: str,
               imgs_save_path: List[str],
-              origins: np.ndarray = None
+              origins: np.ndarray = None,
+              pred_mode: Union["L", "RGB", ...] = "RGB",
+              origin_mode: Union["L", "RGB", ...] = "RGB"
               ) -> None:
+    """
+    :param preds: np array has shape BCHW
+    :param origins: np array shape BCHW
+    """
     if origins is not None:
-        origins = np.transpose(origins, axes=(0, 2, 3, 1))  # B,C,H,W -> B,H,W,C
+        origins = np.transpose(origins, (0, 2, 3, 1))  # B,C,H,W -> B,H,W,C
         zipped_obj = zip(preds, imgs_save_path, origins)
 
         for pred, fp, origin in tqdm(zipped_obj, total=len(imgs_save_path), desc="Saving imgs", colour="cyan"):
             fp = os.path.join(save_path_root, fp)
             origin_fp = fp.split(".")[0] + "_origin.jpg"
 
-            Image.fromarray(pred).save(fp=fp)
-            Image.fromarray(origin).save(fp=origin_fp)
+            Image.fromarray(pred, pred_mode).save(fp=fp)
+            Image.fromarray(origin, origin_mode).save(fp=origin_fp)
     else:
         zipped_obj = zip(preds, imgs_save_path)
 
         for pred, fp in tqdm(zipped_obj, total=len(imgs_save_path), desc="Saving imgs", colour="cyan"):
             fp = os.path.join(save_path_root, fp)
-            Image.fromarray(pred).save(fp=fp)
+            Image.fromarray(pred, pred_mode).save(fp=fp)
     return None
