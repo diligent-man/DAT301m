@@ -1,7 +1,7 @@
 import os
 import gc
 import shutil
-import itertools
+import cv2 as cv
 import numpy as np
 from tqdm import tqdm
 from HED import get_HED
@@ -9,22 +9,22 @@ from typing import List, Tuple
 from matplotlib import pyplot as plt
 from PIL.ImageOps import exif_transpose
 
-
 import torch
 import torchvision
 from torch.utils.data import DataLoader, StackDataset
 from torchvision.transforms import v2, Compose, InterpolationMode
 from utils import img_folder_datasets, get_imgs_save_path, get_pair_dataloader, save_imgs
 
-
 plt.switch_backend("tkagg")
 torch.manual_seed(12345)
 torch.set_grad_enabled(False)
 torch.backends.cudnn.enabled = True
+
+
 ####################################################################################################
 
 
-def detect_edge(root: str ,
+def detect_edge(root: str,
                 save_path_root: str,
                 algorithm: str = "hed",
                 device: str = "cpu",
@@ -32,16 +32,17 @@ def detect_edge(root: str ,
                 crop_rate: float = .1,
                 invert_color: bool = False,
                 save_origin_along: bool = False,
-                input_shape: Tuple[int] = (480, 480)
+                input_shape: Tuple[int] = (600, 600)
                 ) -> None:
     def _get_preprocessing_transform(input_shape: Tuple[int] = (480, 480),
                                      invert_color: bool = False
                                      ) -> Compose:
         transform_lst = [
             v2.Lambda(lambda img: exif_transpose(img)),
-            v2.Resize(input_shape, InterpolationMode.BICUBIC, antialias=True),
+            v2.Resize((800, 800), InterpolationMode.NEAREST_EXACT, antialias=True),
+            v2.CenterCrop(input_shape),
             v2.RandomAutocontrast(p=1.),
-            v2.RandomAdjustSharpness(p=1., sharpness_factor=2.),
+            v2.RandomAdjustSharpness(p=1., sharpness_factor=3.),
             v2.GaussianBlur(kernel_size=3, sigma=1.)
         ]
 
@@ -57,7 +58,22 @@ def detect_edge(root: str ,
     def _canny_detector():
         pass
 
-    def _HED_detector(imgs: torch.Tensor, device: str = "cuda") -> torch.Tensor:
+    def post_processing(imgs: np.ndarray) -> np.ndarray:
+        # Binarizing
+        imgs = np.where(imgs > 0, 255, imgs)
+
+        # Remove noise with morphological transformation
+        # imgs = np.apply_along_axis(cv.morphologyEx, axis=0, arr=imgs, **{"op": cv.MORPH_DILATE, "kernel": kernel, "iterations": 5}).squeeze()
+        kernel = cv.getStructuringElement(shape=cv.MORPH_RECT, ksize=(3, 3), anchor=(-1, 1))
+
+        imgs = list(map(lambda img: cv.morphologyEx(img, cv.MORPH_CLOSE, kernel, iterations=5), imgs))
+        imgs = list(map(lambda img: cv.morphologyEx(img, cv.MORPH_OPEN, kernel, iterations=3), imgs))
+        imgs = list(map(lambda img: cv.morphologyEx(img, cv.MORPH_DILATE, kernel, iterations=2), imgs))
+
+        imgs = np.array(imgs).squeeze()  # B1HW -> BHW
+        return imgs
+
+    def _HED_detector(imgs: torch.Tensor, crop_rate: float, device: str = "cuda") -> torch.Tensor:
         # Create model if not exist in local var
         if "model" not in locals():
             model = get_HED(device=device).eval()
@@ -65,13 +81,14 @@ def detect_edge(root: str ,
         preds = model(imgs.to(device))
         preds = torch.squeeze(preds, dim=1).cpu()  # Model's return: B,1,H,W --sqeeze--> B,H,W
         preds = (torch.squeeze(preds) if batch_size == 1 else preds) * 255.  # H,W if N==1
-        preds = v2.CenterCrop(size=[int(size * (1 - crop_rate)) for size in input_shape])(preds)  # crop 20% border to reduce noise edges
+        preds = v2.CenterCrop(size=[int(size * (1 - crop_rate)) for size in input_shape])(
+            preds)  # crop 20% border to reduce noise edges
         return preds
-
 
     available_algorithms = ["hed", "canny"]
     assert algorithm in available_algorithms, f"Your selected algorithm is unavailable"
 
+    counter = 0
     for dataset, depth in img_folder_datasets(root, _get_preprocessing_transform(input_shape, invert_color)):
         imgs_save_path: List[str] = get_imgs_save_path(dataset, depth, save_path_root)
         dataloader: DataLoader = DataLoader(dataset, batch_size, False, num_workers=4, drop_last=False)
@@ -82,8 +99,9 @@ def detect_edge(root: str ,
 
         for (imgs, labels) in tqdm(dataloader, total=len(dataloader), desc="Detecting"):
             if algorithm == "hed":
-                preds = _HED_detector(imgs, device).type(torch.uint8).numpy()
-                preds = np.where(preds > 0, 255, preds)
+                preds: torch.Tensor = _HED_detector(imgs, crop_rate, device)
+                preds: np.ndarray = torch.round(preds).type(torch.uint8).numpy()
+                preds: np.ndarray = post_processing(preds)
             elif algorithm == "canny":
                 pass
 
@@ -103,36 +121,36 @@ def detect_edge(root: str ,
         # Reset cuda
         torch.cuda.empty_cache()
         gc.collect()
+
+        # counter += 1
+        # if counter == 5: break
     return None
 
 
-def merge_detected_edge(merge_roots: List[str],
+def merge_detected_edge(roots: List[str],
                         save_path_root: str,
                         batch_size: int = 1,
                         delete_merge_roots: bool = True,
                         ) -> None:
-    def _get_preprocessing() -> Compose:
-        return Compose([
-            v2.PILToTensor(),
-            v2.ToDtype(torch.float32, False)
-        ])
+    transform: Compose = Compose([v2.PILToTensor(),
+                                  v2.ToDtype(torch.float32, False)
+                                  ])
 
-    for dataloaders, save_path in get_pair_dataloader(merge_roots, save_path_root, batch_size, _get_preprocessing()):
+    for dataloaders, save_path in get_pair_dataloader(roots, save_path_root, batch_size, transform):
         aggregated_imgs: torch.Tensor = None
 
         for dataloader in dataloaders:
             cached_imgs: torch.Tensor = None
 
-            for imgs, labels in tqdm(dataloader, total=len(dataloader), desc="Processing"):
+            for imgs, labels in tqdm(dataloader, total=len(dataloader), desc="Merging"):
                 cached_imgs = imgs if cached_imgs is None else torch.vstack((cached_imgs, imgs))
 
-            # BCHW -> BHWC
-            cached_imgs = cached_imgs.type(torch.uint8).movedim(1, -1)
+            cached_imgs = cached_imgs.type(torch.uint8).movedim(1, -1)  # BCHW -> BHWC
             aggregated_imgs = cached_imgs if aggregated_imgs is None else torch.add(aggregated_imgs, cached_imgs)
         save_imgs(aggregated_imgs.numpy(), save_path_root, save_path)
 
     if delete_merge_roots:
-        for merge_root in merge_roots:
+        for merge_root in roots:
             shutil.rmtree(merge_root)
     return None
 
@@ -146,7 +164,7 @@ def crop_image_by_edge(orig_img_path: str,
     def _orig_img_preprocessing() -> Compose:
         return Compose([
             v2.Lambda(lambda img: exif_transpose(img)),
-            v2.Resize((1200, 1200), InterpolationMode.BICUBIC, antialias=True),
+            v2.Resize((800, 800), InterpolationMode.BICUBIC, antialias=True),
             v2.PILToTensor(),
             v2.ToDtype(torch.float32, False),
         ])
@@ -163,14 +181,13 @@ def crop_image_by_edge(orig_img_path: str,
 
         try:
             v = torch.max(ROI, axis=0)[0] - torch.min(ROI, axis=0)[0]
-            v =v.roll(1)  # (y, x) -> (x, y)
-            i = torch.tensor([1, 0])
+            v = v.roll(1)  # (y, x) -> (x, y)
+            oy = torch.tensor([0, 1])
 
-            angle = (v @ i) / (torch.sqrt(v@v) * torch.sqrt(i@i))
+            angle = (v @ oy) / (torch.sqrt(v @ v) * torch.sqrt(oy @ oy))
             angle = torch.arccos(angle)
-            angle = (angle * 180 / torch.pi).type(torch.int)
-            angle = torch.tensor(90)
-            # print(angle)
+            angle = torch.round(angle / torch.pi * 180)
+            angle = (-angle).type(torch.int)
         except:
             angle = torch.tensor(0)
         return angle.item()
@@ -182,22 +199,24 @@ def crop_image_by_edge(orig_img_path: str,
     for (orig_dataset, depth), (edge_dataset, _) in zip(img_folder_datasets(orig_img_path, _orig_img_preprocessing()),
                                                         img_folder_datasets(edge_img_path, _edge_img_preprocessing())):
         save_paths = get_imgs_save_path(orig_dataset, depth, save_path_root)
-        print(orig_dataset, edge_dataset)
-        dataloader = DataLoader(StackDataset(orig_dataset, edge_dataset), batch_size=batch_size, shuffle=False, drop_last=False)
+        dataloader = DataLoader(StackDataset(orig_dataset, edge_dataset), batch_size=batch_size, shuffle=False,
+                                drop_last=False)
 
         aggregated_orig_imgs: np.ndarray = None
         aggregated_edge_imgs: np.ndarray = None
 
         for (orig_imgs, _), (edge_imgs, _) in tqdm(dataloader, total=len(dataloader)):
             angles: List[int] = list(map(_compute_rotation_angle, edge_imgs.squeeze(dim=1)))  # (B,H,W)
-            # print(angles)
+            print(angles)
             rotated_orig_imgs = np.array(list(map(_rotate_img, orig_imgs.to("cuda"), angles)))  # B,3,H,W
             rotated_edge_imgs = np.array(list(map(_rotate_img, edge_imgs.to("cuda"), angles)))  # B,1,H,W
 
-            # aggregated_orig_imgs = rotated_orig_imgs if aggregated_orig_imgs is None else np.vstack((aggregated_orig_imgs, rotated_orig_imgs))
-            # aggregated_edge_imgs = aggregated_edge_imgs if aggregated_edge_imgs is None else np.vstack((aggregated_edge_imgs, rotated_edge_imgs))
+            aggregated_orig_imgs = rotated_orig_imgs if aggregated_orig_imgs is None else np.vstack(
+                (aggregated_orig_imgs, rotated_orig_imgs))
+            aggregated_edge_imgs = aggregated_edge_imgs if aggregated_edge_imgs is None else np.vstack(
+                (aggregated_edge_imgs, rotated_edge_imgs))
 
-            aggregated_orig_imgs = orig_imgs.numpy() if aggregated_orig_imgs is None else np.vstack((aggregated_orig_imgs, orig_imgs.numpy()))
+            # aggregated_orig_imgs = orig_imgs.numpy() if aggregated_orig_imgs is None else np.vstack((aggregated_orig_imgs, orig_imgs.numpy()))
         aggregated_orig_imgs = np.transpose(aggregated_orig_imgs.astype(np.uint8), (0, 2, 3, 1))
         save_imgs(aggregated_orig_imgs, save_path_root, save_paths)
     return None
@@ -205,27 +224,49 @@ def crop_image_by_edge(orig_img_path: str,
 
 def main() -> None:
     root = os.path.join(os.getenv("HOME"), "Downloads/Dataset/seam_puckering")
-    # for root, save_path_root, invert_color in zip((root, root),
-    #                                               (f"{os.getenv('HOME')}/Downloads/hed_ouput", f"{os.getenv('HOME')}/Downloads/invert_hed_ouput"),
-    #                                               (False, True)):
-    #     detect_edge(root, save_path_root,
-    #                 invert_color=invert_color,
-    #                 save_origin_along=False,
-    #                 batch_size=104, crop_rate=.2,
-    #                 device="cuda")
-    #####################################################################
-    edge_img_root = os.path.join(os.getenv("HOME"), "Downloads/merge_output")
-    merge_roots = [
-        os.path.join(os.getenv("HOME"), "Downloads", "hed_ouput"),
-        os.path.join(os.getenv("HOME"), "Downloads", "invert_hed_ouput")
+    merge_root = os.path.join(os.getenv("HOME"), "Downloads", "merge")
+    cropped_root = os.path.join(os.getenv("HOME"), "Downloads", "crop")
+    edge_detected_roots = [
+        os.path.join(os.getenv("HOME"), "Downloads", "hed"),
+        os.path.join(os.getenv("HOME"), "Downloads", "invert_hed")
     ]
-    # merge_detected_edge(merge_roots, edge_img_root, batch_size=9999, delete_merge_roots=False)
-    #####################################################################
-    cropped_img_root = os.path.join(os.getenv("HOME"), "Downloads/crop_output")
-    # crop_image_by_edge(root, edge_img_root, cropped_img_root, batch_size=999)
-    # TODO: CHeck rotation angle
+
+    for root, save_path_root, invert_color in zip((root, root), edge_detected_roots, (False, True)):
+        detect_edge(root, save_path_root,
+                    invert_color=invert_color,
+                    save_origin_along=False,
+                    batch_size=60, crop_rate=.3,
+                    device="cuda")
+
+    merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=False)
+    # crop_image_by_edge(root, edge_detected_root, cropped_root, batch_size=9999)
+
+    # TODO: postprocessing edge detected image with
+    # + morphological transformation opening
+    # cv2.connectedcomponents
+    # cv2.convexHull()
     return None
 
 
 if __name__ == '__main__':
-    main()
+    # main()
+
+    # img = "/home/trong/Downloads/hed_ouput/black_s_black (31)/level_1/black_s_black_l1_02.jpg"
+    # img = cv.imread(img, cv.IMREAD_UNCHANGED)
+    # for i in range(img.shape[0]-4):
+    #     vertical_slice = img[:, i:i+4]
+    #
+    #     # find all the contours from the B&W image
+    #     contours, hierarchy = cv.findContours(vertical_slice, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    #
+    #     if len(contours) > 0:
+    #         print(f"Number of Contours found = {len(contours)}")
+    #
+    #         tmp = [np.add(contour, [[[0, i]]]) for contour in contours]
+    #         print(contours)
+    #
+    #
+    #         cv.imwrite(f"/home/trong/Downloads/tmp/vertical_{i}.png", cv.drawContours(img, tmp, -1, 127, 1))
+    #
+    #         for contour in contours:
+    #             continue
