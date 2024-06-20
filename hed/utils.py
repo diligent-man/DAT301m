@@ -140,9 +140,11 @@ def save_imgs(preds: np.ndarray,
               origin_mode: Union["L", "RGB", ...] = "RGB"
               ) -> None:
     """
-    :param preds: np array has shape BCHW
+    :param preds: np array has shape BCHW for colored img
+                                     BHW for grayscale img
     :param origins: np array shape BCHW
     """
+
     if origins is not None:
         origins = np.transpose(origins, (0, 2, 3, 1))  # B,C,H,W -> B,H,W,C
         zipped_obj = zip(preds, imgs_save_path, origins)

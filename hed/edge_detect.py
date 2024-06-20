@@ -22,6 +22,51 @@ torch.backends.cudnn.enabled = True
 
 
 ####################################################################################################
+def fft_transform(root: str,
+                  save_path_root: str,
+                  batch_size: int = 1,
+                  window_size: int = 20,
+                  device: str = "cpu",
+                  input_shape: Tuple[int] = (512, 512),
+                  ) -> None:
+    def _get_preprocessing_transform(input_shape: Tuple[int]) -> Compose:
+        transform_lst = [
+            v2.Lambda(lambda img: exif_transpose(img)),
+            v2.Lambda(lambda img: img.crop(box=(120, 250, img.size[0] - 100, img.size[1] - 80))), # box = (left, top, right, bottom)
+            v2.Resize(input_shape, InterpolationMode.NEAREST, antialias=True),
+            v2.Grayscale(num_output_channels=1),
+            v2.ToImage(),
+            v2.RandomAutocontrast(p=1.),
+            v2.Lambda(lambda img: torch.tensor(cv.boxFilter(img.numpy(), -1, (3, 3), None, (-1, -1), True))),
+            v2.GaussianBlur(kernel_size=3, sigma=5.),
+            v2.RandomAdjustSharpness(p=1., sharpness_factor=3.),
+            v2.ToDtype(dtype=torch.float32, scale=False),
+        ]
+        return Compose(transform_lst)
+
+    y_center, x_center = input_shape[0] // 2, input_shape[1] // 2
+
+    for dataset, depth in img_folder_datasets(root, _get_preprocessing_transform(input_shape)):
+        imgs_save_path: List[str] = get_imgs_save_path(dataset, depth, save_path_root)
+        dataloader: DataLoader = DataLoader(dataset, batch_size, False, num_workers=4, drop_last=False)
+
+        for (imgs, labels) in tqdm(dataloader, total=len(dataloader), desc="Processing"):
+            imgs: torch.Tensor = imgs.to(device)
+
+            # B1HW -> BHW
+            if len(imgs.shape) == 4:
+                imgs = imgs.squeeze(dim=1)
+            # FFT
+            imgs = torch.fft.fftshift(torch.fft.fft2(imgs))
+            # Zero out center
+            imgs[:, y_center - window_size: y_center + window_size + 1, x_center - window_size: x_center + window_size + 1] = 0 + 0j
+            # IFFT
+            imgs = torch.fft.ifft2(torch.fft.ifftshift(imgs))
+            # Image back
+            imgs = 2.5 * torch.abs(imgs)
+            imgs: np.ndarray = imgs.numpy().astype(np.uint8)
+        save_imgs(imgs, save_path_root, imgs_save_path, pred_mode="L")
+    return None
 
 
 def detect_edge(root: str,
@@ -34,16 +79,14 @@ def detect_edge(root: str,
                 save_origin_along: bool = False,
                 input_shape: Tuple[int] = (600, 600)
                 ) -> None:
-    def _get_preprocessing_transform(input_shape: Tuple[int] = (480, 480),
-                                     invert_color: bool = False
-                                     ) -> Compose:
+    def _get_preprocessing(input_shape: Tuple[int], invert_color: bool = False) -> Compose:
         transform_lst = [
             v2.Lambda(lambda img: exif_transpose(img)),
-            v2.Resize((800, 800), InterpolationMode.NEAREST_EXACT, antialias=True),
-            v2.CenterCrop(input_shape),
+            v2.Lambda(lambda img: img.crop(box=(120, 250, img.size[0]-100, img.size[1]-80))),  # box = (left, top, right, bottom)
+            v2.Resize(input_shape, InterpolationMode.NEAREST, antialias=True),
             v2.RandomAutocontrast(p=1.),
-            v2.RandomAdjustSharpness(p=1., sharpness_factor=3.),
-            v2.GaussianBlur(kernel_size=3, sigma=1.)
+            v2.GaussianBlur(kernel_size=5, sigma=11.),
+            v2.RandomAdjustSharpness(p=1., sharpness_factor=7.)
         ]
 
         if invert_color:
@@ -81,15 +124,14 @@ def detect_edge(root: str,
         preds = model(imgs.to(device))
         preds = torch.squeeze(preds, dim=1).cpu()  # Model's return: B,1,H,W --sqeeze--> B,H,W
         preds = (torch.squeeze(preds) if batch_size == 1 else preds) * 255.  # H,W if N==1
-        preds = v2.CenterCrop(size=[int(size * (1 - crop_rate)) for size in input_shape])(
-            preds)  # crop 20% border to reduce noise edges
+        # preds = v2.CenterCrop(size=[int(size * (1 - crop_rate)) for size in input_shape])(preds)  # crop 20% border to reduce noise edges
         return preds
 
     available_algorithms = ["hed", "canny"]
     assert algorithm in available_algorithms, f"Your selected algorithm is unavailable"
 
     counter = 0
-    for dataset, depth in img_folder_datasets(root, _get_preprocessing_transform(input_shape, invert_color)):
+    for dataset, depth in img_folder_datasets(root, _get_preprocessing(input_shape, invert_color)):
         imgs_save_path: List[str] = get_imgs_save_path(dataset, depth, save_path_root)
         dataloader: DataLoader = DataLoader(dataset, batch_size, False, num_workers=4, drop_last=False)
 
@@ -122,7 +164,7 @@ def detect_edge(root: str,
         torch.cuda.empty_cache()
         gc.collect()
 
-        # counter += 1
+        counter += 1
         # if counter == 5: break
     return None
 
@@ -223,50 +265,28 @@ def crop_image_by_edge(orig_img_path: str,
 
 
 def main() -> None:
-    root = os.path.join(os.getenv("HOME"), "Downloads/Dataset/seam_puckering")
-    merge_root = os.path.join(os.getenv("HOME"), "Downloads", "merge")
-    cropped_root = os.path.join(os.getenv("HOME"), "Downloads", "crop")
+    home = os.getenv("HOME")
+    root = os.path.join(home, "Downloads/Dataset/seam_puckering")
+    fft_root = os.path.join(home, "Downloads", "fft")
+    merge_root = os.path.join(home, "Downloads", "merge")
+    cropped_root = os.path.join(home, "Downloads", "crop")
     edge_detected_roots = [
         os.path.join(os.getenv("HOME"), "Downloads", "hed"),
-        os.path.join(os.getenv("HOME"), "Downloads", "invert_hed")
+        os.path.join(os.getenv("HOME"), "Downloads", "invert_hed"),
+        os.path.join(os.getenv("HOME"), "Downloads", "fft_hed"),
     ]
 
-    for root, save_path_root, invert_color in zip((root, root), edge_detected_roots, (False, True)):
-        detect_edge(root, save_path_root,
-                    invert_color=invert_color,
-                    save_origin_along=False,
-                    batch_size=60, crop_rate=.3,
-                    device="cuda")
-
-    merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=False)
+    # fft_transform(root=root, save_path_root=fft_root, batch_size=9999)
+    # for root, save_path_root, invert_color in zip((root, root, fft_root), edge_detected_roots, (False, True, False)):
+    #     detect_edge(root, save_path_root,
+    #                 invert_color=invert_color,
+    #                 save_origin_along=False,
+    #                 batch_size=72, crop_rate=.3,
+    #                 device="cuda")
+    # merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=False)
     # crop_image_by_edge(root, edge_detected_root, cropped_root, batch_size=9999)
-
-    # TODO: postprocessing edge detected image with
-    # + morphological transformation opening
-    # cv2.connectedcomponents
-    # cv2.convexHull()
     return None
 
 
 if __name__ == '__main__':
-    # main()
-
-    # img = "/home/trong/Downloads/hed_ouput/black_s_black (31)/level_1/black_s_black_l1_02.jpg"
-    # img = cv.imread(img, cv.IMREAD_UNCHANGED)
-    # for i in range(img.shape[0]-4):
-    #     vertical_slice = img[:, i:i+4]
-    #
-    #     # find all the contours from the B&W image
-    #     contours, hierarchy = cv.findContours(vertical_slice, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-    #
-    #     if len(contours) > 0:
-    #         print(f"Number of Contours found = {len(contours)}")
-    #
-    #         tmp = [np.add(contour, [[[0, i]]]) for contour in contours]
-    #         print(contours)
-    #
-    #
-    #         cv.imwrite(f"/home/trong/Downloads/tmp/vertical_{i}.png", cv.drawContours(img, tmp, -1, 127, 1))
-    #
-    #         for contour in contours:
-    #             continue
+    main()
