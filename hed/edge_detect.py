@@ -82,7 +82,8 @@ def detect_edge(root: str,
     def _get_preprocessing(input_shape: Tuple[int], invert_color: bool = False) -> Compose:
         transform_lst = [
             v2.Lambda(lambda img: exif_transpose(img)),
-            v2.Lambda(lambda img: img.crop(box=(120, 250, img.size[0]-100, img.size[1]-80))),  # box = (left, top, right, bottom)
+            # Ignore img has size of (512, 512) because fft has the same size
+            v2.Lambda(lambda img: img.crop(box=(120, 250, img.size[0]-110, img.size[1]-90)) if img.size != (512, 512) else img),  # box = (left, top, right, bottom)
             v2.Resize(input_shape, InterpolationMode.NEAREST, antialias=True),
             v2.RandomAutocontrast(p=1.),
             v2.GaussianBlur(kernel_size=5, sigma=11.),
@@ -124,7 +125,7 @@ def detect_edge(root: str,
         preds = model(imgs.to(device))
         preds = torch.squeeze(preds, dim=1).cpu()  # Model's return: B,1,H,W --sqeeze--> B,H,W
         preds = (torch.squeeze(preds) if batch_size == 1 else preds) * 255.  # H,W if N==1
-        # preds = v2.CenterCrop(size=[int(size * (1 - crop_rate)) for size in input_shape])(preds)  # crop 20% border to reduce noise edges
+        preds = v2.CenterCrop(size=[int(size * (1 - crop_rate)) for size in input_shape])(preds)  # crop 20% border to reduce noise edges
         return preds
 
     available_algorithms = ["hed", "canny"]
@@ -276,15 +277,19 @@ def main() -> None:
         os.path.join(os.getenv("HOME"), "Downloads", "fft_hed"),
     ]
 
-    # fft_transform(root=root, save_path_root=fft_root, batch_size=9999)
-    # for root, save_path_root, invert_color in zip((root, root, fft_root), edge_detected_roots, (False, True, False)):
-    #     detect_edge(root, save_path_root,
-    #                 invert_color=invert_color,
-    #                 save_origin_along=False,
-    #                 batch_size=72, crop_rate=.3,
-    #                 device="cuda")
+    fft_transform(root=root, save_path_root=fft_root, batch_size=9999)
+    for root, save_path_root, invert_color in zip((root, root, fft_root), edge_detected_roots, (False, True, False)):
+        detect_edge(root, save_path_root,
+                    invert_color=invert_color,
+                    save_origin_along=False,
+                    batch_size=62, crop_rate=.3,
+                    device="cuda")
     # merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=False)
-    # crop_image_by_edge(root, edge_detected_root, cropped_root, batch_size=9999)
+    # crop_image_by_edge(root, merge_root, cropped_root, batch_size=9999)
+
+    # TODO
+    # https://stackoverflow.com/questions/72061208/how-to-detect-an-object-that-blends-with-the-background
+
     return None
 
 
