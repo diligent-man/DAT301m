@@ -5,9 +5,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = "3"
 import keras_cv
 import tensorflow as tf
 from typing import Tuple, List
-from tensorflow.keras.applications import (
-    VGG16, ResNet50, EfficientNetB0, MobileNetV2
-)
+from tensorflow.keras.applications import (VGG16, ResNet50, EfficientNetB0, MobileNetV2)
 
 __all__ = ['Trainer']
 
@@ -176,6 +174,7 @@ class Trainer:
             callbacks: List[tf.keras.callbacks.Callback] = []
             if apply_checkpointing:
                 checkpoint_dir = os.path.join(os.getcwd(), "checkpoints", self.__model_name)
+
                 callbacks.append(tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_dir,
                                                                     monitor="val_loss",
                                                                     verbose=0,

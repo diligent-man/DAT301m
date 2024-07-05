@@ -9,6 +9,7 @@ class GlobalENV:
     ENV = True
     ROOT_DATASET = Path(r"/home/trong/Downloads/Dataset/seam_puckering/") if ENV else\
                    Path(r"/tf/Dataset/seam_puckering/")
+    # ROOT_DATASET = Path(r"D:\Dataset\seam_puckering")
     TRAIN_ANNOTATION = os.path.join(ROOT_DATASET, "train_annotation.csv")
     VAL_ANNOTATION = os.path.join(ROOT_DATASET, "val_annotation.csv")
 

@@ -123,7 +123,7 @@ def detect_edge(root: str,
             model = get_HED(device=device).eval()
 
         preds = model(imgs.to(device))
-        preds = torch.squeeze(preds, dim=1).cpu()  # Model's return: B,1,H,W --sqeeze--> B,H,W
+        preds = torch.squeeze(preds, dim=1).cpu()  # Model's return: B,1,H,W --squeeze--> B,H,W
         preds = (torch.squeeze(preds) if batch_size == 1 else preds) * 255.  # H,W if N==1
         preds = v2.CenterCrop(size=[int(size * (1 - crop_rate)) for size in input_shape])(preds)  # crop 20% border to reduce noise edges
         return preds
