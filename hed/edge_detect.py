@@ -1,28 +1,29 @@
+"""
+Processing pipeline:
+Input -> HED model (edge detection) -> Hough Transform (Line detection) -> Rotate and crop puckered seamline
+"""
+
 import os
 import gc
 import shutil
-# import kornia
+import kornia
 import cv2 as cv
 import numpy as np
 from tqdm import tqdm
 from HED import get_HED
-from typing import List, Tuple, Optional
-from matplotlib import pyplot as plt
+from typing import List, Tuple
 from PIL.ImageOps import exif_transpose
 
 import torch
-import torchvision
 from torch.utils.data import DataLoader, StackDataset
 from torchvision.transforms import v2, Compose, InterpolationMode
 from utils import img_folder_datasets, get_imgs_save_path, get_pair_dataloader, save_imgs
 
-plt.switch_backend("tkagg")
 torch.manual_seed(12345)
 torch.set_grad_enabled(False)
-torch.backends.cudnn.enabled = True
-
-
 ####################################################################################################
+
+
 def fft_transform(root: str,
                   save_path_root: str,
                   batch_size: int = 1,
@@ -134,7 +135,6 @@ def detect_edge(root: str,
     available_algorithms = ["canny", "hed"]
     assert algorithm in available_algorithms, f"Your selected algorithm is unavailable"
 
-    counter = 0
     for dataset, depth in img_folder_datasets(root, _get_preprocessing(input_shape, invert_color)):
         imgs_save_path: List[str] = get_imgs_save_path(dataset, depth, save_path_root)
         dataloader: DataLoader = DataLoader(dataset, batch_size, False, num_workers=4, drop_last=False)
@@ -172,16 +172,13 @@ def detect_edge(root: str,
         # Reset cuda
         torch.cuda.empty_cache()
         gc.collect()
-
-        # counter += 1
-        # if counter == 5: break
     return None
 
 
 def merge_detected_edge(roots: List[str],
                         save_path_root: str,
                         batch_size: int = 1,
-                        delete_merge_roots: bool = True,
+                        delete_roots: bool = True,
                         ) -> None:
     transform: Compose = Compose([v2.PILToTensor(),
                                   v2.ToDtype(torch.float32, False)
@@ -200,17 +197,17 @@ def merge_detected_edge(roots: List[str],
             aggregated_imgs = cached_imgs if aggregated_imgs is None else torch.add(aggregated_imgs, cached_imgs)
         save_imgs(aggregated_imgs.numpy(), save_path_root, save_path)
 
-    if delete_merge_roots:
+    if delete_roots:
         for merge_root in roots:
             shutil.rmtree(merge_root)
     return None
 
 
 def detect_line(orig_img_path: str,
-                edge_img_path: str,
+                merge_root: str,
                 save_path_root: str,
                 batch_size: int = 1,
-                delete_merge_roots: bool = True
+                delete_merge_root: bool = True
                 ) -> None:
     def _orig_img_preprocessing() -> Compose:
         return Compose([
@@ -227,8 +224,8 @@ def detect_line(orig_img_path: str,
             v2.ToDtype(torch.uint8, False),
         ])
 
-    def _compute_rotation_angle(p1: Tuple[int],
-                                p2: Tuple[int],
+    def _compute_rotation_angle(pt1: Tuple[int],
+                                pt2: Tuple[int],
                                 make_with: str
                                 ) -> float:
         """
@@ -254,7 +251,7 @@ def detect_line(orig_img_path: str,
         return img
 
     for (orig_dataset, depth), (edge_dataset, _) in zip(img_folder_datasets(orig_img_path, _orig_img_preprocessing()),
-                                                        img_folder_datasets(edge_img_path, _edge_img_preprocessing())):
+                                                        img_folder_datasets(merge_root, _edge_img_preprocessing())):
         save_paths = get_imgs_save_path(orig_dataset, depth, save_path_root)
         dataloader = DataLoader(StackDataset(orig_dataset, edge_dataset), batch_size=batch_size, shuffle=False, drop_last=False)
 
@@ -280,9 +277,6 @@ def detect_line(orig_img_path: str,
                     rotation_angle = np.negative(_compute_rotation_angle(pt1, pt2, "oy"))
                     orig_imgs[i] = _rotate(orig_imgs[i], rotation_angle)
 
-
-                center_width = orig_imgs[0].shape[1] // 2
-
             orig_imgs = orig_imgs.byte().numpy()
 
             # Crop from centrer line
@@ -301,7 +295,8 @@ def detect_line(orig_img_path: str,
         torch.cuda.empty_cache()
         gc.collect()
 
-
+    if delete_merge_root:
+        shutil.rmtree(merge_root)
     return None
 
 
@@ -327,8 +322,6 @@ def main() -> None:
                     device="cuda")
     merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=True)
     detect_line(root, merge_root, rotated_root, batch_size=9999)
-
-
     # fft_transform(root=root, save_path_root=fft_root, batch_size=9999)
     # TODO
     # https://stackoverflow.com/questions/72061208/how-to-detect-an-object-that-blends-with-the-background
