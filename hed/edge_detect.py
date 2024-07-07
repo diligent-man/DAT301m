@@ -207,11 +207,11 @@ def merge_detected_edge(roots: List[str],
 
 
 def detect_line(orig_img_path: str,
-                       edge_img_path: str,
-                       save_path_root: str,
-                       batch_size: int = 1,
-                       delete_merge_roots: bool = True
-                       ) -> None:
+                edge_img_path: str,
+                save_path_root: str,
+                batch_size: int = 1,
+                delete_merge_roots: bool = True
+                ) -> None:
     def _orig_img_preprocessing() -> Compose:
         return Compose([
             v2.Lambda(lambda img: exif_transpose(img)),
@@ -261,12 +261,10 @@ def detect_line(orig_img_path: str,
         cached_orig_imgs: np.ndarray = None
         cached_edge_imgs: np.ndarray = None
 
-        print(save_paths[0])
         for (orig_imgs, _), (edge_imgs, _) in tqdm(dataloader, total=len(dataloader)):
             edge_imgs = torch.permute(edge_imgs, (0, 2, 3, 1)).numpy().squeeze()  # BCHW -> BHWC
 
             for i in range(len(orig_imgs)):
-                print(edge_imgs[i].shape)
                 lines = cv.HoughLines(edge_imgs[i], 1, np.pi / 180, 70, None, 0, 0)
 
                 if lines is not None:
@@ -282,7 +280,16 @@ def detect_line(orig_img_path: str,
                     rotation_angle = np.negative(_compute_rotation_angle(pt1, pt2, "oy"))
                     orig_imgs[i] = _rotate(orig_imgs[i], rotation_angle)
 
+
+                center_width = orig_imgs[0].shape[1] // 2
+
             orig_imgs = orig_imgs.byte().numpy()
+
+            # Crop from centrer line
+            _, _, height, width = orig_imgs.shape  # BCHW
+            centroid = (height//2, width//2)
+            orig_imgs = orig_imgs[:, :, 50: height-50, centroid[1]-100: centroid[1]+100]
+
             cached_orig_imgs = orig_imgs if cached_orig_imgs is None else np.vstack((cached_orig_imgs, orig_imgs))
             cached_edge_imgs = edge_imgs if cached_edge_imgs is None else np.vstack((cached_edge_imgs, edge_imgs))
 
@@ -310,15 +317,15 @@ def main() -> None:
         # os.path.join(os.getenv("HOME"), "Downloads", "fft_hed"),
     ]
 
-    # for root, save_path_root, invert_color in zip((root, root), edge_detected_roots, (False, True)):
-    #     detect_edge(root, save_path_root,
-    #                 algorithm="hed",
-    #                 invert_color=invert_color,
-    #                 save_origin_along=False,
-    #                 batch_size=62,
-    #                 crop_rate=0.1,
-    #                 device="cuda")
-    # merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=True)
+    for root, save_path_root, invert_color in zip((root, root), edge_detected_roots, (False, True)):
+        detect_edge(root, save_path_root,
+                    algorithm="hed",
+                    invert_color=invert_color,
+                    save_origin_along=False,
+                    batch_size=62,
+                    crop_rate=0.1,
+                    device="cuda")
+    merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=True)
     detect_line(root, merge_root, rotated_root, batch_size=9999)
 
 
