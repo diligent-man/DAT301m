@@ -1,6 +1,7 @@
 import os
 import gc
 import shutil
+import kornia
 import cv2 as cv
 import numpy as np
 from tqdm import tqdm
@@ -27,19 +28,24 @@ def fft_transform(root: str,
                   batch_size: int = 1,
                   window_size: int = 20,
                   device: str = "cpu",
-                  input_shape: Tuple[int] = (512, 512),
+                  # input_shape: Tuple[int] = (512, 512),
+                  input_shape: Tuple[int] = (1024, 1024),
                   ) -> None:
     def _get_preprocessing_transform(input_shape: Tuple[int]) -> Compose:
         transform_lst = [
             v2.Lambda(lambda img: exif_transpose(img)),
-            v2.Lambda(lambda img: img.crop(box=(120, 250, img.size[0] - 100, img.size[1] - 80))), # box = (left, top, right, bottom)
-            v2.Resize(input_shape, InterpolationMode.NEAREST, antialias=True),
-            v2.Grayscale(num_output_channels=1),
-            v2.ToImage(),
             v2.RandomAutocontrast(p=1.),
-            v2.Lambda(lambda img: torch.tensor(cv.boxFilter(img.numpy(), -1, (3, 3), None, (-1, -1), True))),
-            v2.GaussianBlur(kernel_size=3, sigma=5.),
-            v2.RandomAdjustSharpness(p=1., sharpness_factor=3.),
+            # Cropping four sides
+            v2.Lambda(lambda img: img.crop(box=(120, 250, img.size[0] - 100, img.size[1] - 80))),  # box = (left, top, right, bottom)
+            v2.Resize(input_shape, InterpolationMode.NEAREST_EXACT, antialias=True),
+            # Convert grayscale
+            v2.Lambda(lambda img: cv.cvtColor(np.array(img.convert('RGB')), cv.COLOR_RGB2GRAY)),
+            # Filter 3x3
+            v2.Lambda(lambda img: cv.boxFilter(img, -1, ksize=(3, 3))),
+            # HW -> 1HW
+            v2.Lambda(lambda img: np.expand_dims(img, axis=0)),
+            # Conver to tensor
+            v2.Lambda(lambda img: torch.from_numpy(img)),
             v2.ToDtype(dtype=torch.float32, scale=False),
         ]
         return Compose(transform_lst)
@@ -60,11 +66,8 @@ def fft_transform(root: str,
             imgs = torch.fft.fftshift(torch.fft.fft2(imgs))
             # Zero out center
             imgs[:, y_center - window_size: y_center + window_size + 1, x_center - window_size: x_center + window_size + 1] = 0 + 0j
-            # IFFT
-            imgs = torch.fft.ifft2(torch.fft.ifftshift(imgs))
-            # Image back
-            imgs = 2.5 * torch.abs(imgs)
-            imgs: np.ndarray = imgs.numpy().astype(np.uint8)
+            # IFFT -> Image back
+            imgs: np.ndarray = torch.abs(torch.fft.ifft2(torch.fft.ifftshift(imgs))).type(torch.uint8).numpy()
         save_imgs(imgs, save_path_root, imgs_save_path, pred_mode="L")
     return None
 
@@ -86,7 +89,7 @@ def detect_edge(root: str,
             v2.Lambda(lambda img: img.crop(box=(120, 250, img.size[0]-110, img.size[1]-90)) if img.size != (512, 512) else img),  # box = (left, top, right, bottom)
             v2.Resize(input_shape, InterpolationMode.NEAREST, antialias=True),
             v2.RandomAutocontrast(p=1.),
-            v2.GaussianBlur(kernel_size=5, sigma=11.),
+            v2.GaussianBlur(kernel_size=3, sigma=3.),
             v2.RandomAdjustSharpness(p=1., sharpness_factor=7.)
         ]
 
@@ -98,9 +101,6 @@ def detect_edge(root: str,
             v2.ToDtype(dtype=torch.float32, scale=False),
         ]
         return Compose(transform_lst)
-
-    def _canny_detector():
-        pass
 
     def post_processing(imgs: np.ndarray) -> np.ndarray:
         # Binarizing
@@ -117,18 +117,18 @@ def detect_edge(root: str,
         imgs = np.array(imgs).squeeze()  # B1HW -> BHW
         return imgs
 
-    def _HED_detector(imgs: torch.Tensor, crop_rate: float, device: str = "cuda") -> torch.Tensor:
+    def _HED_detector(imgs: torch.Tensor, crop_rate: float = 0., device: str = "cuda") -> torch.Tensor:
         # Create model if not exist in local var
         if "model" not in locals():
             model = get_HED(device=device).eval()
 
-        preds = model(imgs.to(device))
-        preds = torch.squeeze(preds, dim=1).cpu()  # Model's return: B,1,H,W --squeeze--> B,H,W
-        preds = (torch.squeeze(preds) if batch_size == 1 else preds) * 255.  # H,W if N==1
+        preds = model(imgs)
+        preds = torch.squeeze(preds)  # Model's return: B,1,H,W --squeeze--> B,H,W
+        preds = torch.squeeze(preds) * 255.  # H,W if N==1
         preds = v2.CenterCrop(size=[int(size * (1 - crop_rate)) for size in input_shape])(preds)  # crop 20% border to reduce noise edges
-        return preds
+        return preds.cpu()
 
-    available_algorithms = ["hed", "canny"]
+    available_algorithms = ["canny", "hed"]
     assert algorithm in available_algorithms, f"Your selected algorithm is unavailable"
 
     counter = 0
@@ -141,18 +141,23 @@ def detect_edge(root: str,
         cached_origins: np.ndarray = None  # B3HW
 
         for (imgs, labels) in tqdm(dataloader, total=len(dataloader), desc="Detecting"):
+            imgs = imgs.to(device)
+
             if algorithm == "hed":
                 preds: torch.Tensor = _HED_detector(imgs, crop_rate, device)
-                preds: np.ndarray = torch.round(preds).type(torch.uint8).numpy()
+                preds: np.ndarray = preds.byte().numpy()
                 preds: np.ndarray = post_processing(preds)
             elif algorithm == "canny":
-                pass
+                # canny return Tuple(magnitude, edges) in the shape of B1HW
+                mag, preds = kornia.filters.canny(imgs / 255.)  # BCHW -> B1HW
+                preds = kornia.tensor_to_image(preds.byte())  # B1HW -> BHW
+                preds *= 255
 
             cached_preds = preds if cached_preds is None else np.vstack((cached_preds, preds))
 
             # cache original imgs along
             if save_origin_along:
-                imgs = imgs.type(torch.uint8).numpy()
+                imgs = imgs.byte().cpu().numpy()
                 cached_origins = imgs if cached_origins is None else np.vstack((cached_origins, imgs))
 
         # Save cached imgs
@@ -165,7 +170,7 @@ def detect_edge(root: str,
         torch.cuda.empty_cache()
         gc.collect()
 
-        counter += 1
+        # counter += 1
         # if counter == 5: break
     return None
 
@@ -198,7 +203,7 @@ def merge_detected_edge(roots: List[str],
     return None
 
 
-def crop_image_by_edge(orig_img_path: str,
+def detect_line(orig_img_path: str,
                        edge_img_path: str,
                        save_path_root: str,
                        batch_size: int = 1,
@@ -216,52 +221,61 @@ def crop_image_by_edge(orig_img_path: str,
         return Compose([
             v2.Grayscale(),
             v2.PILToTensor(),
-            v2.ToDtype(torch.float32, False)
+            v2.ToDtype(torch.float32, False),
         ])
 
-    def _compute_rotation_angle(edge_img: torch.Tensor) -> int:
-        ROI = torch.argwhere(edge_img > 0)
+    # def _compute_rotation_angle(edge_img: torch.Tensor) -> int:
+    #     ROI = torch.argwhere(edge_img > 0)
+    #
+    #     try:
+    #         v = torch.max(ROI, axis=0)[0] - torch.min(ROI, axis=0)[0]
+    #         v = v.roll(1)  # (y, x) -> (x, y)
+    #         oy = torch.tensor([0, 1])
+    #
+    #         angle = (v @ oy) / (torch.sqrt(v @ v) * torch.sqrt(oy @ oy))
+    #         angle = torch.arccos(angle)
+    #         angle = torch.round(angle / torch.pi * 180)
+    #         angle = (-angle).type(torch.int)
+    #     except:
+    #         angle = torch.tensor(0)
+    #     return angle.item()
 
-        try:
-            v = torch.max(ROI, axis=0)[0] - torch.min(ROI, axis=0)[0]
-            v = v.roll(1)  # (y, x) -> (x, y)
-            oy = torch.tensor([0, 1])
+    # def _rotate_img(img, angle, interpolation=InterpolationMode.BILINEAR) -> np.ndarray:
+    #     img = torchvision.transforms.v2.functional.rotate(img, angle, interpolation)
+    #     return img.detach().cpu().numpy()
 
-            angle = (v @ oy) / (torch.sqrt(v @ v) * torch.sqrt(oy @ oy))
-            angle = torch.arccos(angle)
-            angle = torch.round(angle / torch.pi * 180)
-            angle = (-angle).type(torch.int)
-        except:
-            angle = torch.tensor(0)
-        return angle.item()
-
-    def _rotate_img(img, angle, interpolation=InterpolationMode.BILINEAR) -> np.ndarray:
-        img = torchvision.transforms.v2.functional.rotate(img, angle, interpolation)
-        return img.detach().cpu().numpy()
+    hough_transform = Compose([
+        v2.Lambda(lambda img: img.numpy())
+    ])
 
     for (orig_dataset, depth), (edge_dataset, _) in zip(img_folder_datasets(orig_img_path, _orig_img_preprocessing()),
                                                         img_folder_datasets(edge_img_path, _edge_img_preprocessing())):
         save_paths = get_imgs_save_path(orig_dataset, depth, save_path_root)
-        dataloader = DataLoader(StackDataset(orig_dataset, edge_dataset), batch_size=batch_size, shuffle=False,
-                                drop_last=False)
+        dataloader = DataLoader(StackDataset(orig_dataset, edge_dataset), batch_size=batch_size, shuffle=False, drop_last=False)
 
-        aggregated_orig_imgs: np.ndarray = None
-        aggregated_edge_imgs: np.ndarray = None
+        cached_orig_imgs: np.ndarray = None
+        cached_edge_imgs: np.ndarray = None
 
         for (orig_imgs, _), (edge_imgs, _) in tqdm(dataloader, total=len(dataloader)):
-            angles: List[int] = list(map(_compute_rotation_angle, edge_imgs.squeeze(dim=1)))  # (B,H,W)
-            print(angles)
-            rotated_orig_imgs = np.array(list(map(_rotate_img, orig_imgs.to("cuda"), angles)))  # B,3,H,W
-            rotated_edge_imgs = np.array(list(map(_rotate_img, edge_imgs.to("cuda"), angles)))  # B,1,H,W
+            edge_imgs = hough_transform(edge_imgs)
+            orig_imgs = orig_imgs.byte().numpy()
 
-            aggregated_orig_imgs = rotated_orig_imgs if aggregated_orig_imgs is None else np.vstack(
-                (aggregated_orig_imgs, rotated_orig_imgs))
-            aggregated_edge_imgs = aggregated_edge_imgs if aggregated_edge_imgs is None else np.vstack(
-                (aggregated_edge_imgs, rotated_edge_imgs))
 
-            # aggregated_orig_imgs = orig_imgs.numpy() if aggregated_orig_imgs is None else np.vstack((aggregated_orig_imgs, orig_imgs.numpy()))
-        aggregated_orig_imgs = np.transpose(aggregated_orig_imgs.astype(np.uint8), (0, 2, 3, 1))
-        save_imgs(aggregated_orig_imgs, save_path_root, save_paths)
+            # angles: List[int] = list(map(_compute_rotation_angle, edge_imgs.squeeze(dim=1)))  # (B,H,W)
+            # print(angles)
+            # rotated_orig_imgs = np.array(list(map(_rotate_img, orig_imgs.to("cuda"), angles)))  # B,3,H,W
+            # rotated_edge_imgs = np.array(list(map(_rotate_img, edge_imgs.to("cuda"), angles)))  # B,1,H,W
+            #
+            cached_orig_imgs = orig_imgs if cached_orig_imgs is None else np.vstack((cached_orig_imgs, orig_imgs))
+            cached_edge_imgs = edge_imgs if cached_edge_imgs is None else np.vstack((cached_edge_imgs, edge_imgs))
+
+        # Save rotated imgs
+        cached_orig_imgs = np.transpose(cached_orig_imgs, (0, 2, 3, 1))  # BCHW -> BHWC
+        save_imgs(cached_orig_imgs, save_path_root, save_paths)
+
+        # Reset cuda
+        torch.cuda.empty_cache()
+        gc.collect()
     return None
 
 
@@ -270,23 +284,26 @@ def main() -> None:
     root = os.path.join(home, "Downloads/Dataset/seam_puckering")
     fft_root = os.path.join(home, "Downloads", "fft")
     merge_root = os.path.join(home, "Downloads", "merge")
-    cropped_root = os.path.join(home, "Downloads", "crop")
+    rotated_root = os.path.join(home, "Downloads", "crop")
     edge_detected_roots = [
         os.path.join(os.getenv("HOME"), "Downloads", "hed"),
         os.path.join(os.getenv("HOME"), "Downloads", "invert_hed"),
-        os.path.join(os.getenv("HOME"), "Downloads", "fft_hed"),
+        # os.path.join(os.getenv("HOME"), "Downloads", "fft_hed"),
     ]
 
-    fft_transform(root=root, save_path_root=fft_root, batch_size=9999)
-    for root, save_path_root, invert_color in zip((root, root, fft_root), edge_detected_roots, (False, True, False)):
-        detect_edge(root, save_path_root,
-                    invert_color=invert_color,
-                    save_origin_along=False,
-                    batch_size=62, crop_rate=.3,
-                    device="cuda")
-    # merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=False)
-    # crop_image_by_edge(root, merge_root, cropped_root, batch_size=9999)
+    # for root, save_path_root, invert_color in zip((root, root), edge_detected_roots, (False, True)):
+    #     detect_edge(root, save_path_root,
+    #                 algorithm="hed",
+    #                 invert_color=invert_color,
+    #                 save_origin_along=False,
+    #                 batch_size=62,
+    #                 crop_rate=0.,
+    #                 device="cuda")
+    # merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=True)
+    detect_line(root, merge_root, rotated_root, batch_size=9999)
 
+
+    # fft_transform(root=root, save_path_root=fft_root, batch_size=9999)
     # TODO
     # https://stackoverflow.com/questions/72061208/how-to-detect-an-object-that-blends-with-the-background
 

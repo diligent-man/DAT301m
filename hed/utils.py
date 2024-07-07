@@ -1,4 +1,6 @@
 import os
+
+import cv2
 import numpy as np
 from tqdm import tqdm
 from PIL import Image
@@ -147,9 +149,8 @@ def save_imgs(preds: np.ndarray,
 
     if origins is not None:
         origins = np.transpose(origins, (0, 2, 3, 1))  # B,C,H,W -> B,H,W,C
-        zipped_obj = zip(preds, imgs_save_path, origins)
 
-        for pred, fp, origin in tqdm(zipped_obj, total=len(imgs_save_path), desc="Saving imgs", colour="cyan"):
+        for pred, fp, origin in tqdm(zip(preds, imgs_save_path, origins), total=len(imgs_save_path), desc="Saving imgs", colour="cyan"):
             fp = os.path.join(save_path_root, fp)
             origin_fp = fp.split(".")[0] + "_origin.jpg"
 
