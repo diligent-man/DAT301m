@@ -9,43 +9,81 @@ plt.switch_backend("tkagg")
 
 
 def main1() -> None:
-    img = "/home/trong/Downloads/fft_hed/black_s_black (31)/level_1/black_s_black_l1_02_origin.jpg"
+    # img = "/home/trong/Downloads/merge/black_s_black (31)/level_1/black_s_black_l1_15.jpg"
+    img = "/home/trong/Downloads/merge/black_s_black (31)/level_1/black_s_black_l1_17.jpg"
     img = cv.imread(img, cv.IMREAD_GRAYSCALE)
 
-    img = cv.boxFilter(img, -1, (7, 7))
-    img = torch.tensor(img)
-    print(img.shape)
-    fft = np.fft.fftshift(np.fft.fft2(img))
+    # img = cv.boxFilter(img, -1, (7, 7))
+    # img = torch.tensor(img)
+    # fft = np.fft.fftshift(np.fft.fft2(img))
     # fft = torch.fft.fftshift(torch.fft.fft2(img))
 
-    window_size = 30
-    y_center, x_center = img.shape[0] // 2, img.shape[1] // 2
+    # window_size = 30
+    # y_center, x_center = img.shape[0] // 2, img.shape[1] // 2
 
-    fft[y_center - window_size: y_center + window_size + 1, x_center - window_size: x_center + window_size + 1] = 0 + 0j
+    # fft[y_center - window_size: y_center + window_size + 1, x_center - window_size: x_center + window_size + 1] = 0 + 0j
     # plt.imshow(torch.log(torch.abs(fft)) + 1, cmap="gray")
-    plt.imshow(np.log(np.abs(fft) + 1), cmap="gray")
-    plt.show()
+    # plt.imshow(np.log(np.abs(fft) + 1), cmap="gray")
+    # plt.show()
 
     # img_back = torch.abs(torch.fft.ifft2(torch.fft.ifftshift(fft))).type(torch.uint8).numpy()
-    img_back = np.abs(np.fft.ifft2(np.fft.ifftshift(fft))).astype(np.uint8).copy()
-    plt.imshow(img_back, cmap="gray")
-    plt.show()
+    # img_back = np.abs(np.fft.ifft2(np.fft.ifftshift(fft))).astype(np.uint8).copy()
+    # plt.imshow(img_back, cmap="gray")
+    # plt.show()
 
-    lines = cv.HoughLines(img_back, 1, np.pi / 180, 10, None, 0, 0)
+    lines = cv.HoughLines(img, 1, np.pi / 180, 70, None, 0, 0)
+    print(len(lines))
     if lines is not None:
-        for i in range(0, len(lines)):
-            rho = lines[i][0][0]
-        theta = lines[i][0][1]
-        a = np.cos(theta)
-        b = np.sin(theta)
-        x0 = a * rho
-        y0 = b * rho
-        pt1 = (int(x0 + 1000 * (-b)), int(y0 + 1000 * (a)))
-        pt2 = (int(x0 - 1000 * (-b)), int(y0 - 1000 * (a)))
-        img_back = cv.line(img_back, pt1, pt2, 175, 5, cv.LINE_AA)
+        for i in range(len(lines)):
+            rho, theta = lines[i][0]
 
-    plt.imshow(img_back, cmap="gray")
+            a = np.cos(theta)
+            b = np.sin(theta)
+
+            x0 = a * rho
+            y0 = b * rho
+
+            # rho * cos - 1000 * sin
+            pt1 = (int(x0 + 1000 * (-b)), int(y0 + 1000 * (a)))
+            pt2 = (int(x0 - 1000 * (-b)), int(y0 - 1000 * (a)))
+
+            # print(rho, theta, a, b, x0, y0, pt1, pt2)
+            img = cv.line(img, pt1, pt2, 177, 1, cv.LINE_AA)
+
+    plt.imshow(img, cmap="gray")
     plt.show()
+
+    oy = np.array([0, 1])
+    v = np.array(pt2) - np.array(pt1)
+    cos_theta = (v@oy) / (np.sqrt(v@v) + 1)
+    theta = np.arccos(cos_theta) / np.pi * 180
+
+    def rotation(image, angleInDegrees):
+        h, w = image.shape[:2]
+        img_c = (w / 2, h / 2)
+
+        rot = cv.getRotationMatrix2D(img_c, angleInDegrees, 1)
+
+        rad = np.radians(angleInDegrees)
+        sin = np.sin(rad)
+        cos = np.cos(rad)
+        b_w = int((h * abs(sin)) + (w * abs(cos)))
+        b_h = int((h * abs(cos)) + (w * abs(sin)))
+
+        rot[0, 2] += ((b_w / 2) - img_c[0])
+        rot[1, 2] += ((b_h / 2) - img_c[1])
+
+        outImg = cv.warpAffine(image, rot, (b_w, b_h), flags=cv.INTER_LINEAR)
+        return outImg
+
+    img = rotation(img, -theta)
+    plt.imshow(img, cmap="gray")
+    plt.show()
+
+
+
+
+
     return None
 
 

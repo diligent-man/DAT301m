@@ -1,12 +1,12 @@
 import os
 import gc
 import shutil
-import kornia
+# import kornia
 import cv2 as cv
 import numpy as np
 from tqdm import tqdm
 from HED import get_HED
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from matplotlib import pyplot as plt
 from PIL.ImageOps import exif_transpose
 
@@ -86,10 +86,10 @@ def detect_edge(root: str,
         transform_lst = [
             v2.Lambda(lambda img: exif_transpose(img)),
             # Ignore img has size of (512, 512) because fft has the same size
-            v2.Lambda(lambda img: img.crop(box=(120, 250, img.size[0]-110, img.size[1]-90)) if img.size != (512, 512) else img),  # box = (left, top, right, bottom)
-            v2.Resize(input_shape, InterpolationMode.NEAREST, antialias=True),
+            v2.Lambda(lambda img: img.crop(box=(120, 250, img.size[0]-110, img.size[1]-110)) if img.size > (1000, 1000) else img),  # box = (left, top, right, bottom)
+            v2.Resize(input_shape, InterpolationMode.NEAREST_EXACT, antialias=True),
             v2.RandomAutocontrast(p=1.),
-            v2.GaussianBlur(kernel_size=3, sigma=3.),
+            v2.GaussianBlur(kernel_size=5, sigma=3.),
             v2.RandomAdjustSharpness(p=1., sharpness_factor=7.)
         ]
 
@@ -103,6 +103,9 @@ def detect_edge(root: str,
         return Compose(transform_lst)
 
     def post_processing(imgs: np.ndarray) -> np.ndarray:
+        """
+        :param imgs: batch of shape BHW
+        """
         # Binarizing
         imgs = np.where(imgs > 0, 255, imgs)
 
@@ -114,7 +117,7 @@ def detect_edge(root: str,
         imgs = list(map(lambda img: cv.morphologyEx(img, cv.MORPH_OPEN, kernel, iterations=3), imgs))
         imgs = list(map(lambda img: cv.morphologyEx(img, cv.MORPH_DILATE, kernel, iterations=2), imgs))
 
-        imgs = np.array(imgs).squeeze()  # B1HW -> BHW
+        imgs = np.array(imgs)  # B1HW -> BHW
         return imgs
 
     def _HED_detector(imgs: torch.Tensor, crop_rate: float = 0., device: str = "cuda") -> torch.Tensor:
@@ -123,8 +126,8 @@ def detect_edge(root: str,
             model = get_HED(device=device).eval()
 
         preds = model(imgs)
-        preds = torch.squeeze(preds)  # Model's return: B,1,H,W --squeeze--> B,H,W
-        preds = torch.squeeze(preds) * 255.  # H,W if N==1
+        preds = torch.squeeze(preds, 1)  # Model's return: B,1,H,W --squeeze--> B,H,W
+        preds *= 255.  # H,W if N==1
         preds = v2.CenterCrop(size=[int(size * (1 - crop_rate)) for size in input_shape])(preds)  # crop 20% border to reduce noise edges
         return preds.cpu()
 
@@ -221,32 +224,34 @@ def detect_line(orig_img_path: str,
         return Compose([
             v2.Grayscale(),
             v2.PILToTensor(),
-            v2.ToDtype(torch.float32, False),
+            v2.ToDtype(torch.uint8, False),
         ])
 
-    # def _compute_rotation_angle(edge_img: torch.Tensor) -> int:
-    #     ROI = torch.argwhere(edge_img > 0)
-    #
-    #     try:
-    #         v = torch.max(ROI, axis=0)[0] - torch.min(ROI, axis=0)[0]
-    #         v = v.roll(1)  # (y, x) -> (x, y)
-    #         oy = torch.tensor([0, 1])
-    #
-    #         angle = (v @ oy) / (torch.sqrt(v @ v) * torch.sqrt(oy @ oy))
-    #         angle = torch.arccos(angle)
-    #         angle = torch.round(angle / torch.pi * 180)
-    #         angle = (-angle).type(torch.int)
-    #     except:
-    #         angle = torch.tensor(0)
-    #     return angle.item()
+    def _compute_rotation_angle(p1: Tuple[int],
+                                p2: Tuple[int],
+                                make_with: str
+                                ) -> float:
+        """
+        :param p1: coord tuple
+        :param p2: coord tuple
+        :param make_with: Ox or Oy
+        :return: angle in degree
+        """
+        v1 = np.array(pt2) - np.array(pt1)
+        v2 = np.array([0, 1]) if make_with == "oy" else np.array([1, 0])
 
-    # def _rotate_img(img, angle, interpolation=InterpolationMode.BILINEAR) -> np.ndarray:
-    #     img = torchvision.transforms.v2.functional.rotate(img, angle, interpolation)
-    #     return img.detach().cpu().numpy()
+        cos_theta = (v1 @ v2) / (np.sqrt(v1 @ v1) + 1)
+        theta = np.arccos(cos_theta)
+        theta = theta / np.pi * 180  # covert to degree
+        return theta
 
-    hough_transform = Compose([
-        v2.Lambda(lambda img: img.numpy())
-    ])
+    def _rotate(image: torch.Tensor, angleInDegrees: float) -> torch.Tensor:
+        """
+        :param image: HWC image
+        :return: rotated image
+        """
+        img = v2.functional.rotate(image, angleInDegrees, InterpolationMode.BILINEAR, expand=False)
+        return img
 
     for (orig_dataset, depth), (edge_dataset, _) in zip(img_folder_datasets(orig_img_path, _orig_img_preprocessing()),
                                                         img_folder_datasets(edge_img_path, _edge_img_preprocessing())):
@@ -256,16 +261,28 @@ def detect_line(orig_img_path: str,
         cached_orig_imgs: np.ndarray = None
         cached_edge_imgs: np.ndarray = None
 
+        print(save_paths[0])
         for (orig_imgs, _), (edge_imgs, _) in tqdm(dataloader, total=len(dataloader)):
-            edge_imgs = hough_transform(edge_imgs)
+            edge_imgs = torch.permute(edge_imgs, (0, 2, 3, 1)).numpy().squeeze()  # BCHW -> BHWC
+
+            for i in range(len(orig_imgs)):
+                print(edge_imgs[i].shape)
+                lines = cv.HoughLines(edge_imgs[i], 1, np.pi / 180, 70, None, 0, 0)
+
+                if lines is not None:
+                    # Calculation formula check later on
+                    r, theta = lines[0, 0]
+
+                    a, b = np.cos(theta), np.sin(theta)
+                    x0, y0 = a * r, b * r
+
+                    pt1 = (int(x0 + 1000 * (-b)), int(y0 + 1000 * (a)))
+                    pt2 = (int(x0 - 1000 * (-b)), int(y0 - 1000 * (a)))
+
+                    rotation_angle = np.negative(_compute_rotation_angle(pt1, pt2, "oy"))
+                    orig_imgs[i] = _rotate(orig_imgs[i], rotation_angle)
+
             orig_imgs = orig_imgs.byte().numpy()
-
-
-            # angles: List[int] = list(map(_compute_rotation_angle, edge_imgs.squeeze(dim=1)))  # (B,H,W)
-            # print(angles)
-            # rotated_orig_imgs = np.array(list(map(_rotate_img, orig_imgs.to("cuda"), angles)))  # B,3,H,W
-            # rotated_edge_imgs = np.array(list(map(_rotate_img, edge_imgs.to("cuda"), angles)))  # B,1,H,W
-            #
             cached_orig_imgs = orig_imgs if cached_orig_imgs is None else np.vstack((cached_orig_imgs, orig_imgs))
             cached_edge_imgs = edge_imgs if cached_edge_imgs is None else np.vstack((cached_edge_imgs, edge_imgs))
 
@@ -276,6 +293,8 @@ def detect_line(orig_img_path: str,
         # Reset cuda
         torch.cuda.empty_cache()
         gc.collect()
+
+
     return None
 
 
@@ -297,7 +316,7 @@ def main() -> None:
     #                 invert_color=invert_color,
     #                 save_origin_along=False,
     #                 batch_size=62,
-    #                 crop_rate=0.,
+    #                 crop_rate=0.1,
     #                 device="cuda")
     # merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=True)
     detect_line(root, merge_root, rotated_root, batch_size=9999)
@@ -306,7 +325,6 @@ def main() -> None:
     # fft_transform(root=root, save_path_root=fft_root, batch_size=9999)
     # TODO
     # https://stackoverflow.com/questions/72061208/how-to-detect-an-object-that-blends-with-the-background
-
     return None
 
 
