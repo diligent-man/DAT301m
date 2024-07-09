@@ -143,7 +143,7 @@ def detect_edge(root: str,
         cached_preds: np.ndarray = None  # BHW
         cached_origins: np.ndarray = None  # B3HW
 
-        for (imgs, labels) in tqdm(dataloader, total=len(dataloader), desc="Detecting"):
+        for (imgs, labels) in tqdm(dataloader, total=len(dataloader), desc="Detecting edge"):
             imgs = imgs.to(device)
 
             if algorithm == "hed":
@@ -258,11 +258,11 @@ def detect_line(orig_img_path: str,
         cached_orig_imgs: np.ndarray = None
         cached_edge_imgs: np.ndarray = None
 
-        for (orig_imgs, _), (edge_imgs, _) in tqdm(dataloader, total=len(dataloader)):
+        for (orig_imgs, _), (edge_imgs, _) in tqdm(dataloader, total=len(dataloader), desc=f"Detecting line for {save_paths[0].split(os.sep)[0]}"):
             edge_imgs = torch.permute(edge_imgs, (0, 2, 3, 1)).numpy().squeeze()  # BCHW -> BHWC
 
             for i in range(len(orig_imgs)):
-                lines = cv.HoughLines(edge_imgs[i], 1, np.pi / 180, 70, None, 0, 0)
+                lines = cv.HoughLines(edge_imgs[i], 1, np.pi / 180, 10, None, 0, 0)
 
                 if lines is not None:
                     # Calculation formula check later on
@@ -281,8 +281,8 @@ def detect_line(orig_img_path: str,
 
             # Crop from centrer line
             _, _, height, width = orig_imgs.shape  # BCHW
-            centroid = (height//2, width//2)
-            orig_imgs = orig_imgs[:, :, 50: height-50, centroid[1]-100: centroid[1]+100]
+            centroid = (height // 2, width // 2)
+            orig_imgs = orig_imgs[:, :, 50: height-50, centroid[1]-50: centroid[1]+50]
 
             cached_orig_imgs = orig_imgs if cached_orig_imgs is None else np.vstack((cached_orig_imgs, orig_imgs))
             cached_edge_imgs = edge_imgs if cached_edge_imgs is None else np.vstack((cached_edge_imgs, edge_imgs))
@@ -312,16 +312,16 @@ def main() -> None:
         # os.path.join(os.getenv("HOME"), "Downloads", "fft_hed"),
     ]
 
-    for root, save_path_root, invert_color in zip((root, root), edge_detected_roots, (False, True)):
-        detect_edge(root, save_path_root,
-                    algorithm="hed",
-                    invert_color=invert_color,
-                    save_origin_along=False,
-                    batch_size=62,
-                    crop_rate=0.1,
-                    device="cuda")
-    merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_merge_roots=True)
-    detect_line(root, merge_root, rotated_root, batch_size=9999)
+    # for root, save_path_root, invert_color in zip((root, root), edge_detected_roots, (False, True)):
+    #     detect_edge(root, save_path_root,
+    #                 algorithm="hed",
+    #                 invert_color=invert_color,
+    #                 save_origin_along=False,
+    #                 batch_size=62,
+    #                 crop_rate=0.1,
+    #                 device="cuda")
+    # merge_detected_edge(edge_detected_roots, merge_root, batch_size=9999, delete_roots=True)
+    detect_line(root, merge_root, rotated_root, batch_size=9999, delete_merge_root=False)
     # fft_transform(root=root, save_path_root=fft_root, batch_size=9999)
     # TODO
     # https://stackoverflow.com/questions/72061208/how-to-detect-an-object-that-blends-with-the-background

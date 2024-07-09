@@ -6,10 +6,10 @@ __all__ = ["GlobalENV"]
 
 class GlobalENV:
     # Dataset Path
-    ENV = True
-    ROOT_DATASET = Path(r"/home/trong/Downloads/Dataset/seam_puckering/") if ENV else\
-                   Path(r"/tf/Dataset/seam_puckering/")
-    # ROOT_DATASET = Path(r"D:\Dataset\seam_puckering")
+    ENV = False
+    ROOT_DATASET = Path(r"/home/trong/Downloads/Dataset/crop_seam_puckering") if ENV else\
+                   Path(r"/tf/Dataset/crop_seam_puckering")
+
     TRAIN_ANNOTATION = os.path.join(ROOT_DATASET, "train_annotation.csv")
     VAL_ANNOTATION = os.path.join(ROOT_DATASET, "val_annotation.csv")
 
@@ -29,7 +29,7 @@ class GlobalENV:
     INPUT_SHAPE = (224, 224, 3)
 
     # Scheduler
-    LR = 1e-3
+    LR = 1e-4
     T_MULT = 1
     EPOCH_TO_WARM_RESTART = 10
 

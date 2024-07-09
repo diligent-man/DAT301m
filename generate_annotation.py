@@ -1,13 +1,7 @@
 import os
 import pandas as pd
 
-from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
-from sympy.printing.pretty.stringpict import prettyForm
-
-plt.switch_backend("tkagg")
-
-__all__ = ["generate_annotation", "split_train_test"]
 
 
 def generate_annotation(root_path: str) -> None:
