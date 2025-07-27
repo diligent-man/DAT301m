@@ -58,18 +58,16 @@ class Trainer:
                        pretrained: bool = False,
                        get_summary: bool = True,
                        ) -> tf.keras.Sequential:
-        def _get_augmentations(input_shape: Tuple[int], seed) -> tf.keras.Sequential:
+        def _get_augmentations(input_shape: Tuple[int], seed: int) -> tf.keras.Sequential:
             # Augmentations for seam puckering dataset
             return tf.keras.Sequential([
-                tf.keras.layers.RandomZoom(height_factor=(-.3, .3), width_factor=(-.3, .3), fill_mode='reflect', interpolation='nearest', seed=seed),
-                tf.keras.layers.RandomFlip(mode="horizontal_and_vertical", seed=seed),
-                tf.keras.layers.RandomRotation(factor=(-1, 1), fill_mode="reflect", interpolation="nearest",seed=seed),
+                tf.keras.layers.RandomRotation(factor=(-1, 1), fill_mode="constant", interpolation="nearest",seed=seed),
                 keras_cv.layers.RandomSharpness(factor=.01, value_range=(0, 255), seed=seed),
 
-                tf.keras.layers.CenterCrop(*input_shape[:2]),
                 keras_cv.layers.AutoContrast(value_range=(0, 255)),
+                tf.keras.layers.Resizing(*input_shape[:2], interpolation="nearest", crop_to_aspect_ratio=True),
                 tf.keras.layers.Rescaling(scale=1./255)], name="preprocessing_and_augmentation")
-                # tf.keras.layers.Rescaling(scale=1./127.5, offset=-1)], name="preprocessing_and_augmentation")
+
 
         def _adapt_classifier(model_name: str, num_classes: int) -> tf.keras.Sequential:
             classifier: tf.keras.Sequential = None
@@ -125,9 +123,10 @@ class Trainer:
 
             model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
                           optimizer=tf.keras.optimizers.Adam(learning_rate=scheduler, use_ema=True, amsgrad=True),
-                          metrics=["acc",
-                                   tf.keras.metrics.F1Score(average="micro", name="f1")]
-                          )
+                          metrics=[
+                              "acc",
+                              tf.keras.metrics.F1Score(average="micro", name="f1")
+                          ])
             return None
 
         if pretrained:
@@ -148,13 +147,13 @@ class Trainer:
         _compile_model(model, train_loader, lr, t_mult, epoch_to_warm_restart)
 
         if get_summary:
-            model.build(input_shape=(None, *(800, 800, 3)))
+            model.build(input_shape=(None, *(224, 224, 3)))
             model.summary(expand_nested=True,
                           show_trainable=True
                           )
         return model
 
-    ##########3########################################################################################
+    ###################################################################################################
 
     def train(self,
               train_loader: tf.data.Dataset,

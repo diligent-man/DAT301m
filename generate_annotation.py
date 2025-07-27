@@ -44,11 +44,11 @@ def split_train_test(root_path: str,
 
 
 def main() -> None:
-    dataset_root_path = "/home/trong/Downloads/crop"
+    dataset_root_path = "/home/trong/Downloads/Dataset/seam_puckering/filtered_crop_seam_puckering"
 
     generate_annotation(dataset_root_path)
-    split_train_test(dataset_root_path, annotation_file="annotation.csv", data_types=["train", "test"], train_size=.8)
-    split_train_test(dataset_root_path, annotation_file="train_annotation.csv", data_types=["train", "val"], train_size=.8)
+    split_train_test(dataset_root_path, annotation_file="annotation.csv", data_types=["train", "test"], train_size=.9)
+    split_train_test(dataset_root_path, annotation_file="train_annotation.csv", data_types=["train", "val"], train_size=.9)
     return None
 
 

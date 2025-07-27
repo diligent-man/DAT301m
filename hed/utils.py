@@ -70,7 +70,7 @@ def img_folder_datasets(root: str,
     min_depth = 0
     num_classes: int = 0
     for dirpath, dirname, filename in sorted(os.walk(root)):
-        if len(filename) > 0 and filename[0].endswith("jpg") and flag is True:
+        if len(filename) > 0 and filename[0].endswith(("jpg", "jpeg")) and flag is True:
             if flag:
                 min_depth = depth
                 flag = False

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="5e5922ea-49a7-4941-a08c-5f521f4a9efe" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/.idea/Final_project.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/EfficientNetB0/withPretrained/fingerprint.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/EfficientNetB0/withPretrained/keras_metadata.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/EfficientNetB0/withPretrained/saved_model.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/EfficientNetB0/withPretrained/variables/variables.data-00000-of-00001" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/EfficientNetB0/withPretrained/variables/variables.index" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/EfficientNetB0/withoutPretrained/fingerprint.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/EfficientNetB0/withoutPretrained/keras_metadata.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/EfficientNetB0/withoutPretrained/saved_model.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/EfficientNetB0/withoutPretrained/variables/variables.data-00000-of-00001" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/EfficientNetB0/withoutPretrained/variables/variables.index" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/MobileNetV2/withPretrained/fingerprint.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/MobileNetV2/withPretrained/keras_metadata.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/MobileNetV2/withPretrained/saved_model.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/MobileNetV2/withPretrained/variables/variables.data-00000-of-00001" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/MobileNetV2/withPretrained/variables/variables.index" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/MobileNetV2/withoutPretrained/fingerprint.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/MobileNetV2/withoutPretrained/keras_metadata.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/MobileNetV2/withoutPretrained/saved_model.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/MobileNetV2/withoutPretrained/variables/variables.data-00000-of-00001" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/MobileNetV2/withoutPretrained/variables/variables.index" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/ResNet50/withPretrained/fingerprint.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/ResNet50/withPretrained/keras_metadata.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/ResNet50/withPretrained/saved_model.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/ResNet50/withPretrained/variables/variables.data-00000-of-00001" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/ResNet50/withPretrained/variables/variables.index" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/ResNet50/withoutPretrained/fingerprint.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/ResNet50/withoutPretrained/keras_metadata.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/ResNet50/withoutPretrained/saved_model.pb" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/ResNet50/withoutPretrained/variables/variables.data-00000-of-00001" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/checkpoints/ResNet50/withoutPretrained/variables/variables.index" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/EfficientNetB0/withPretrained/train/events.out.tfevents.1720543347.b889162c6b56.19108.0.v2" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/EfficientNetB0/withPretrained/validation/events.out.tfevents.1720543353.b889162c6b56.19108.1.v2" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/EfficientNetB0/withoutPretrained/train/events.out.tfevents.1720543226.b889162c6b56.17481.0.v2" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/EfficientNetB0/withoutPretrained/validation/events.out.tfevents.1720543253.b889162c6b56.17481.1.v2" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/MobileNetV2/withPretrained/validation/events.out.tfevents.1720542068.b889162c6b56.4658.1.v2" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/MobileNetV2/withoutPretrained/train/events.out.tfevents.1720541862.b889162c6b56.887.0.v2" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/MobileNetV2/withoutPretrained/validation/events.out.tfevents.1720541880.b889162c6b56.887.1.v2" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/ResNet50/withPretrained/train/events.out.tfevents.1720542564.b889162c6b56.12510.0.v2" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/ResNet50/withPretrained/validation/events.out.tfevents.1720542568.b889162c6b56.12510.1.v2" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/ResNet50/withoutPretrained/train/events.out.tfevents.1720542388.b889162c6b56.10919.0.v2" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tensorboard_logs/ResNet50/withoutPretrained/validation/events.out.tfevents.1720542411.b889162c6b56.10919.1.v2" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.ipynb_checkpoints/run-checkpoint.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/.ipynb_checkpoints/run-checkpoint.ipynb" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Trainer.py" beforeDir="false" afterPath="$PROJECT_DIR$/Trainer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/checkpoints/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/generate_annotation.py" beforeDir="false" afterPath="$PROJECT_DIR$/generate_annotation.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/global_env.py" beforeDir="false" afterPath="$PROJECT_DIR$/global_env.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/hed/edge_detect.py" beforeDir="false" afterPath="$PROJECT_DIR$/hed/edge_detect.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/run.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/run.ipynb" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tensorboard_logs/MobileNetV2/train/events.out.tfevents.1720527897.b889162c6b56.5681.0.v2" beforeDir="false" afterPath="$PROJECT_DIR$/tensorboard_logs/MobileNetV2/withPretrained/train/events.out.tfevents.1720542064.b889162c6b56.4658.0.v2" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tensorboard_logs/MobileNetV2/validation/events.out.tfevents.1720527901.b889162c6b56.5681.1.v2" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/train_main1.py" beforeDir="false" afterPath="$PROJECT_DIR$/train_main1.py" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 8
+}</component>
+  <component name="ProjectId" id="2j21WGKhMlc4cYxjCLQsVvZtuHR" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/home/trong/Downloads/Local/Source/python/semester_7/DAT301m/Final_project&quot;
+  }
+}</component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-5b207ade9991-7e9c3bbb6e34-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-241.17890.14" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="5e5922ea-49a7-4941-a08c-5f521f4a9efe" name="Changes" comment="" />
+      <created>1720570388153</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1720570388153</updated>
+      <workItem from="1720570389164" duration="580000" />
+      <workItem from="1720574539402" duration="3000" />
+    </task>
+    <servers />
+  </component>
+</project>
